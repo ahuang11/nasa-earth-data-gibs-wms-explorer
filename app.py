@@ -43,10 +43,10 @@ class NasaEarthDataGibsWmsExplorer:
         pn.state.onload(self._onload)
     
     def _onload(self):
-        # add interactivity
-        self.product_select.param.watch(self.update_layers, "value")
-        self.layer_select.param.watch(self.update_time, "value")
-        self.refresh_button.on_click(self.update_web_map)
+        # add interactivity; we use watch because the function does not return anything
+        pn.bind(self.update_layers, self.product_select, watch=True)
+        pn.bind(self.update_time, self.layer_select, watch=True)
+        pn.bind(self.refresh_layer, self.refresh_button, watch=True)
 
         # create imagery
         base_map = hv.element.tiles.EsriImagery().opts(
@@ -54,8 +54,11 @@ class NasaEarthDataGibsWmsExplorer:
         )
         self.dynamic_map = hv.DynamicMap(
             self.update_web_map, streams=[self.time_slider.param.value_throttled]
-        )
+        ).opts(responsive=True)
         self.holoviews_pane.object = base_map * self.dynamic_map
+
+    def refresh_layer(self, clicks=None):
+        self.time_slider.param.trigger("value_throttled")
 
     def get_layer(self, product=None, product_layer=None):
         product = product or self.product_select.value
@@ -65,12 +68,11 @@ class NasaEarthDataGibsWmsExplorer:
             layer = f"{product}_{product_layer or self.layer_select.value}"
         return layer
 
-    def update_layers(self, event):
-        product = event.new
+    def update_layers(self, product):
         product_layers = self.products_layers[product]
         self.layer_select.options = sorted(product_layers)
 
-    def update_time(self, event):
+    def update_time(self, product_layer):
         layer = self.get_layer()
         time_positions = self.wms.contents[layer].timepositions
         if time_positions:
@@ -86,13 +88,13 @@ class NasaEarthDataGibsWmsExplorer:
             )
             if options:
                 value = options[0]
-                self.time_slider.param.set_param(options=options, value=value)
-                return
-        # use N/A instead of None to circumvent Panel from crashing
-        # when going from time-dependent layer to time-independent layer
-        options = ["N/A"]
-        self.time_slider.options = options
-        self.time_slider.param.trigger("value_throttled")
+                # value does not trigger; depends on value_throttled
+                self.time_slider.param.update(options=options, value=value)
+        else:
+            # use N/A instead of None to circumvent Panel from crashing
+            # when going from time-dependent layer to time-independent layer
+            self.time_slider.options = ["N/A"]
+        self.refresh_layer()
 
     def get_url_template(self, layer, time=None):
         get_map_kwargs = dict(
@@ -124,6 +126,7 @@ class NasaEarthDataGibsWmsExplorer:
             time = self.time_slider.value
             if time == "N/A":
                 time = None
+            print(f"Updating to {layer}")
             url_template = self.get_url_template(layer, time)
             layer_meta = self.wms[layer]
             self.image_pane.object = layer_meta.styles.get("default", {}).get("legend")
@@ -143,10 +146,13 @@ class NasaEarthDataGibsWmsExplorer:
             sizing_mode="stretch_both",
             max_width=300,
         )
-        return pn.Row(
-            widget_box,
-            self.holoviews_pane,
+        template = pn.template.BootstrapTemplate(
+            title="NASA Earth Data GIBS WMS Explorer",
+            header_background="#2E4E7E",
+            sidebar=[widget_box],
+            main=[self.holoviews_pane],
         )
+        return template
 
 
 explorer = NasaEarthDataGibsWmsExplorer()
